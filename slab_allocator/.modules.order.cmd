@@ -1,0 +1,1 @@
+savedcmd_/home/karthikdpatel/Documents/Kernel_Drivers/slab_allocator/modules.order := {   echo /home/karthikdpatel/Documents/Kernel_Drivers/slab_allocator/slab_allocator.o; :; } > /home/karthikdpatel/Documents/Kernel_Drivers/slab_allocator/modules.order

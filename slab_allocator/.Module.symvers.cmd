@@ -1,0 +1,1 @@
+savedcmd_/home/karthikdpatel/Documents/Kernel_Drivers/slab_allocator/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/karthikdpatel/Documents/Kernel_Drivers/slab_allocator/Module.symvers -T /home/karthikdpatel/Documents/Kernel_Drivers/slab_allocator/modules.order -i Module.symvers -e 
