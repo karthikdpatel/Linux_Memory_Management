@@ -1,1 +1,1 @@
-/home/karthikdpatel/Documents/Kernel_Drivers/slab_allocator/slab_allocator.o
+/home/karthikdpatel/Documents/Linux_Memory_Management/slab_allocator/slab_allocator.o
