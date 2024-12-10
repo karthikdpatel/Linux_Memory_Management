@@ -1,0 +1,1 @@
+#define PAGE_NOT_AVAILABLE 10

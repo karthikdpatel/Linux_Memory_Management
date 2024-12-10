@@ -1,0 +1,1 @@
+savedcmd_/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/Module.symvers -T /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/modules.order -i Module.symvers -e 
