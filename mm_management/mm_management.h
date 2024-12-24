@@ -38,6 +38,7 @@ struct mm_page_frame
 };
 
 static void print_list(void);
+static void print_swap_space(void);
 static struct mm_page_frame * pframe_init(int i);
 static int initialize_memory(void);
 static int get_multilevel_pagetables(uintptr_t vfn, uintptr_t level, uintptr_t page_table_addr, uintptr_t * next_page_addr);

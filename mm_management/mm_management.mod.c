@@ -43,11 +43,11 @@ __used __section("__versions") = {
 	{ 0x9ed12e20, "kmalloc_large" },
 	{ 0xcefb0c9f, "__mutex_init" },
 	{ 0xbdfb6dbb, "__fentry__" },
+	{ 0x122c3a7e, "_printk" },
+	{ 0x5b8239ca, "__x86_return_thunk" },
 	{ 0x4c03a563, "random_kmalloc_seed" },
 	{ 0xa63b4eed, "kmalloc_caches" },
 	{ 0x59ffeca6, "kmalloc_trace" },
-	{ 0x5b8239ca, "__x86_return_thunk" },
-	{ 0x122c3a7e, "_printk" },
 	{ 0x37a0cba, "kfree" },
 	{ 0xf079b8f9, "module_layout" },
 };
@@ -55,4 +55,4 @@ __used __section("__versions") = {
 MODULE_INFO(depends, "");
 
 
-MODULE_INFO(srcversion, "69E732BDDABDD00B9EBE71F");
+MODULE_INFO(srcversion, "4899AABD1AB6F6ACDEA95B4");

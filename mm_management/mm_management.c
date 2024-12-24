@@ -16,7 +16,7 @@ struct swap_space * swap_sp;
 uintptr_t latest_virtual_address = 0x0000000000000000;	
 
 /*
-This function prints the physical addresses of athe pages present in free_pages, alloc_pages, pinned_pages list
+This function prints the physical addresses of the pages present in free_pages, alloc_pages, pinned_pages list
 */
 
 static void print_list(void)
@@ -45,6 +45,22 @@ static void print_list(void)
 		p_frame = list_entry(pos, struct mm_page_frame, pf_link);
 		printk("mm_management : phy addr:%lx\n", p_frame->physical_start_address);
 	}
+	printk("mm_management : ----------------------------\n");
+}
+
+static void print_swap_space(void)
+{
+	struct list_head *pos;
+	struct swap_block *s_block;
+	
+	printk("mm_management : ----------------------------\n");
+	printk("mm_management : Swap Space Pages----\n");
+	list_for_each(pos, &swap_sp->swap_blocks)
+	{
+		s_block = list_entry(pos, struct swap_block, ss_link);
+		printk("mm_management : pid:%d, vfn addr:%lx\n", s_block->pid, s_block->virtual_pframe_addr);
+	}
+	
 	printk("mm_management : ----------------------------\n");
 }
 
@@ -624,6 +640,8 @@ static int __init mm_management_init(void)
 	}
 	print_list();
 	
+	print_swap_space();
+	
 	uintptr_t addr1, p_addr1;
 	printk("mm_management : ---------------------------\n");
 	int err = get_free_page(&addr1);
@@ -635,6 +653,8 @@ static int __init mm_management_init(void)
 	
 	virtual_to_physical_address(addr1, &p_addr1);
 	printk("mm_management : physical address adr1:%lx\n", p_addr1);
+	
+	print_swap_space();
 	
 	printk("mm_management : ---------------------------\n");
 	uintptr_t addr2;
@@ -648,10 +668,14 @@ static int __init mm_management_init(void)
 	virtual_to_physical_address(addr2, &addr2);
 	printk("mm_management : physical address adr2:%lx\n", addr2);
 	
+	print_swap_space();
+	
 	printk("mm_management : ---------------------------\n");
 	
 	virtual_to_physical_address(addr1, &p_addr1);
 	printk("mm_management : physical address adr1:%lx\n", p_addr1);
+	
+	print_swap_space();
 	
 	//print_list();
 	
