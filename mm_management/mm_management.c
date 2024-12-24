@@ -10,455 +10,709 @@
 
 MODULE_LICENSE("Dual BSD/GPL");
 
-void * memory_addr;
+struct mm_physical_memory * mem;
+struct swap_space * swap_sp;
 
-struct mm_memory * mem;
-uintptr_t latest_virtual_p_frame_addr_usr_space = 0x0000000000000000;
-uintptr_t latest_virtual_p_frame_addr_kernel_space = 0xFFFF800000000000;
+uintptr_t latest_virtual_address = 0x0000000000000000;	
+
+/*
+This function prints the physical addresses of athe pages present in free_pages, alloc_pages, pinned_pages list
+*/
+
+static void print_list(void)
+{
+	struct list_head *pos;
+	struct mm_page_frame *p_frame;
+	
+	printk("mm_management : ----------------------------\n");
+	printk("mm_management : Free pages----\n");
+	list_for_each(pos, &mem->free_pages)
+	{
+		p_frame = list_entry(pos, struct mm_page_frame, pf_link);
+		printk("mm_management : phy addr:%lx\n", p_frame->physical_start_address);
+	}
+	
+	printk("mm_management : Allocated pages----\n");
+	list_for_each(pos, &mem->alloc_pages)
+	{
+		p_frame = list_entry(pos, struct mm_page_frame, pf_link);
+		printk("mm_management : phy addr:%lx\n", p_frame->physical_start_address);
+	}
+	
+	printk("mm_management : Pinned pages----\n");
+	list_for_each(pos, &mem->pinned_pages)
+	{
+		p_frame = list_entry(pos, struct mm_page_frame, pf_link);
+		printk("mm_management : phy addr:%lx\n", p_frame->physical_start_address);
+	}
+	printk("mm_management : ----------------------------\n");
+}
+
+/*
+This function initializes struct mm_page_frame
+Parameters : 
+i : the index of page frame in the entire memory.
+Returns : pointer of type struct mm_page_frame with initialized values of mm_page_frame
+*/
+
+static struct mm_page_frame * pframe_init(int i)
+{
+	struct mm_page_frame * p_frame;
+	
+	p_frame = kmalloc(sizeof(struct mm_page_frame), GFP_KERNEL);
+	if(!mem)
+	{
+		printk(KERN_ERR "mm_management : Error allocating struct mm_page_frame\n");
+		return NULL;
+	}
+	p_frame->physical_start_address = mem->memory_addr_start + i*PAGE_SIZE_EXP;
+	p_frame->size = PAGE_SIZE_EXP;
+	p_frame->pf_flags = 0;
+	
+	return p_frame;
+}
+
+/*
+This function gets the requested memory from the Linux kernel which will be acts as the primary memory in the simulator and it divides the primary memory into page frames
+*/
 
 static int initialize_memory(void)
 {
-	memory_addr = kmalloc(TOTAL_MEMORY_EXP, GFP_KERNEL);
-	if(!memory_addr)
-	{
-		printk(KERN_ERR "mm_management : Error in getting the total memory\n");
-		return -1;
-	}
-	
-	mem = kmalloc(sizeof(struct mm_memory), GFP_KERNEL);
+	mem = kmalloc( sizeof(struct mm_physical_memory), GFP_KERNEL);
 	if(!mem)
 	{
-		printk(KERN_ERR "mm_management : Error in allocating memory structure\n");
-		return -1;
+		printk(KERN_ERR "mm_management : Error allocating struct mm_physical_memory\n");
+		return -ERROR_ALLOCATING_MEMORY;
 	}
 	
-	mem->num_user_space_pages = (TOTAL_MEMORY_EXP * 3) / (PAGE_SIZE_EXP * 4) ;
-	mem->num_free_user_space_pages = mem->num_user_space_pages;
+	mem->memory_addr_start = (uintptr_t)kmalloc( TOTAL_MEMORY_EXP, GFP_KERNEL);
+	if(!mem->memory_addr_start)
+	{
+		printk(KERN_ERR "mm_management : Error allocating requested memory\n");
+		return -ERROR_ALLOCATING_MEMORY;
+	}
+	mem->total_pages = TOTAL_MEMORY_EXP / PAGE_SIZE_EXP;
 	
-	//printk("mm_management : Number of user space pages:%lx\n", mem->num_user_space_pages);
-	
-	mem->num_kernel_pages = (TOTAL_MEMORY_EXP / (PAGE_SIZE_EXP * 4));
-	mem->num_free_kernel_pages = mem->num_kernel_pages;
-	
-	//printk("mm_management : Number of user space pages:%lx\n", mem->num_kernel_pages);
-	
-	INIT_LIST_HEAD(&mem->user_space_free_pages_list);
-	INIT_LIST_HEAD(&mem->user_space_alloc_pages_list);
-	
-	INIT_LIST_HEAD(&mem->kernel_free_pages_list);
-	INIT_LIST_HEAD(&mem->kernel_alloc_pages_list);
+	INIT_LIST_HEAD(&mem->free_pages);
+	INIT_LIST_HEAD(&mem->alloc_pages);
+	INIT_LIST_HEAD(&mem->pinned_pages);
 	
 	mutex_init(&mem->mm_memory_mutex);
 	
-	mem->userspace_memory_addr = memory_addr;
+	struct mm_page_frame * p_frame;
 	
-	int i;
-	struct page_frame *p_frame;
-	
-	for(i=0; i < mem->num_user_space_pages; i++)
+	for(int i=0; i < mem->total_pages-1; i++)
 	{
-		p_frame = kmalloc(sizeof(struct page_frame), GFP_KERNEL);
+		p_frame = pframe_init(i);
 		if(!p_frame)
 		{
-			printk(KERN_ERR "mm_management : Error in allocating pageframe structure\n");
-			return -1;
+			return -ERROR_ALLOCATING_MEMORY;
 		}
-		
-		p_frame->physical_start_addr = memory_addr + i*PAGE_SIZE_EXP;
-		p_frame->size = PAGE_SIZE_EXP;
-		p_frame->physical_page_frame_num = ((uintptr_t)p_frame->physical_start_addr >> 12);
-		
-		list_add_tail(&p_frame->mm_memory_list, &mem->user_space_free_pages_list);
-		p_frame->free = true;
+		list_add_tail(&p_frame->pf_link, &mem->free_pages);
 	}
 	
-	mem->kernel_memory_addr = memory_addr + mem->num_user_space_pages * PAGE_SIZE_EXP;
-	
-	for(i=0 ; i < mem->num_kernel_pages; i++)
+	p_frame = pframe_init(mem->total_pages-1);
+	if(!p_frame)
 	{
-		p_frame = kmalloc(sizeof(struct page_frame), GFP_KERNEL);
-		if(!p_frame)
-		{
-			printk(KERN_ERR "mm_management : Error in allocating pageframe structure\n");
-			return -1;
-		}
+		return -ERROR_ALLOCATING_MEMORY;
+	}
+	list_add_tail(&p_frame->pf_link, &mem->pinned_pages);
+	
+	mem->cr3_page_table_addr = p_frame->physical_start_address;
+	
+	swap_sp = kmalloc( sizeof(struct swap_space), GFP_KERNEL);
+	INIT_LIST_HEAD(&swap_sp->swap_blocks);
+	mutex_init(&swap_sp->swap_space_mutex);
+	
+	return 0;	
+}
+
+
+
+
+
+
+/*
+
+This function gets the page table addresses of the multilevel page tables and at the 4th level gets the physical page address
+Parameters :
+vfn : virtual frame number
+level : page table level (1-4)
+page_table_addr : current page table address
+* next_page_addr : returns next page table address or at the last level returns the physical page address
+
+*/
+
+static int get_multilevel_pagetables(uintptr_t vfn, uintptr_t level, uintptr_t page_table_addr, uintptr_t * next_page_addr)
+{
+	//printk("DEBUG : get_multilevel_pagetables\n");
+	uintptr_t ind;
+	int err;
+	
+	switch(level)
+	{
+		case 1: ind = (vfn &  0xFF8000000) >> 27; //Extract 27-35 bits of vfn
+			break;
 		
-		p_frame->physical_start_addr = mem->kernel_memory_addr + i*PAGE_SIZE_EXP;
-		p_frame->size = PAGE_SIZE_EXP;
-		p_frame->physical_page_frame_num = ((uintptr_t)p_frame->physical_start_addr >> 12);
-		
-		if(i != mem->num_kernel_pages-1)
-		{
-			list_add_tail(&p_frame->mm_memory_list, &mem->kernel_free_pages_list);
-			p_frame->free = true;
-		}
-		else
-		{
-			list_add_tail(&p_frame->mm_memory_list, &mem->kernel_alloc_pages_list);
-			p_frame->free = false;
-			mem->cr3_page_table_addr = p_frame->physical_start_addr;
-		}
-		
+		case 2: ind = (vfn &  0x07FC0000) >> 18; //Extract 18-26 bits of vfn
+			break;
+			
+		case 3: ind = (vfn &  0x03FE00) >> 9; //Extract 9-17 bits of vfn
+			break;
+			
+		case 4: ind = (vfn &  0x01FF); //Extract 0-8 bits of vfn
+			break;
 	}
 	
+	uintptr_t * pte_address = (uintptr_t *)((void *)page_table_addr + ind*4); // get PTE address
+	
+	if( !(*pte_address & 0x010000000000000) ) // Improv :  check if the PTE entry has a valid physical address
+	{
+		struct swap_meta_data meta_data = {
+			.pid = current->pid,
+			.virtual_pframe_addr = vfn << 12,
+		};
+		
+		err = handle_page_fault(PAGE_FAULT_INVALID_PTE, &meta_data);
+		if(err)
+		{
+			printk(KERN_ERR "mm_management : handlepagefault, err:%d\n", err);
+			return err;
+		}
+	}
+	*next_page_addr = (*pte_address & 0x000FFFFFFFFFFFFF) << 12;
 	
 	return 0;
 }
 
-static void check_free_memory(void)
-{
-	struct list_head *pos;
-	struct page_frame *p_frame;
-	
-	printk("mm_management : Free Pages User Space--\n");
-	list_for_each(pos, &mem->user_space_free_pages_list)
-	{
-		p_frame = list_entry(pos, struct page_frame, mm_memory_list);
-		printk("mm_management : pagenum:%lx, phy addr:%px\n", p_frame->physical_page_frame_num, p_frame->physical_start_addr);
-	}
-	
-	printk("mm_management : Free Pages Kernel Space--\n");
-	list_for_each(pos, &mem->kernel_free_pages_list)
-	{
-		p_frame = list_entry(pos, struct page_frame, mm_memory_list);
-		printk("mm_management : pagenum:%lx, phy addr:%px\n", p_frame->physical_page_frame_num, p_frame->physical_start_addr);
-	}
-}
 
-static void check_alloc_pages(void)
-{
-	struct list_head *pos;
-	struct page_frame *p_frame;
-	
-	printk("mm_management : Allocated User Space Pages--\n");
-	list_for_each(pos, &mem->user_space_alloc_pages_list)
-	{
-		p_frame = list_entry(pos, struct page_frame, mm_memory_list);
-		printk("mm_management : pagenum:%lx, phy addr:%px\n", p_frame->physical_page_frame_num, p_frame->physical_start_addr);
-	}
-	
-	printk("mm_management : Allocated Kernel Space Pages--\n");
-	list_for_each(pos, &mem->kernel_alloc_pages_list)
-	{
-		p_frame = list_entry(pos, struct page_frame, mm_memory_list);
-		printk("mm_management : pagenum:%lx, phy addr:%px\n", p_frame->physical_page_frame_num, p_frame->physical_start_addr);
-	}
-}
+/*
+This function sets the validity bit of the PTE of the given virtual address to 0(invalid PTE)
+*/
 
-static struct page_frame * mm_get_free_page_internal(bool get_kernel_page_flag)
+static int invalidate_PTE(uintptr_t virtual_page_address)
 {
-	struct page_frame * p_frame;
+	int err;
+	uintptr_t page_table_addr;
+	uintptr_t vfn = virtual_page_address >> 12;
 	
-	if(get_kernel_page_flag)
+	err = get_multilevel_pagetables(vfn, 1, mem->cr3_page_table_addr, &page_table_addr);
+	if(err)
 	{
-		mutex_lock(&mem->mm_memory_mutex);
-		if(list_empty(&mem->kernel_free_pages_list))
-		{
-			mutex_unlock(&mem->mm_memory_mutex);
-			return NULL;
-		}
-		
-		p_frame = list_first_entry(&mem->kernel_free_pages_list, struct page_frame, mm_memory_list);
-		list_move_tail(&p_frame->mm_memory_list, &mem->kernel_alloc_pages_list);
-		
-		mem->num_free_kernel_pages -= 1;
-		p_frame->free = false;
+		return err;
+	}
+	
+	err = get_multilevel_pagetables(vfn, 2, page_table_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	err = get_multilevel_pagetables(vfn, 3, page_table_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	uintptr_t ind = (vfn &  0x01FF);
+	uintptr_t * pte_address = (uintptr_t *)((void *)page_table_addr + ind*4);
+	
+	if( !(*pte_address & 0x010000000000000) )
+	{
+		printk(KERN_ERR "mm_management : Wrong PTE value found while invalidating the PTE\n");
+		return -WRONG_VALUE;
 	}
 	else
 	{
-		mutex_lock(&mem->mm_memory_mutex);
-		if(list_empty(&mem->user_space_free_pages_list))
+		*pte_address = *pte_address & 0xFFEFFFFFFFFFFFFF;
+	}
+	
+	printk("mm_management : PAGE_SWAP : INVALIDATED PTE : PTE value: %lx\n", *pte_address);
+	
+	return 0;
+}
+
+
+/*
+This function moves the allocated page into free page list and copies the data in the allocated page into space
+*/
+
+static int swap_page(void)
+{
+	struct swap_block * swap_block = kmalloc( sizeof(struct swap_block), GFP_KERNEL);
+	if(!swap_block)
+	{
+		printk(KERN_ERR "mm_management : Error allocating struct swap_block\n");
+		return -ERROR_ALLOCATING_MEMORY;
+	}
+	
+	while(1)
+	{
+		if( mutex_trylock(&mem->mm_memory_mutex) )
 		{
+			if( mutex_trylock(&swap_sp->swap_space_mutex) )
+			{
+				break;
+			}
 			mutex_unlock(&mem->mm_memory_mutex);
-			return NULL;
 		}
 		
-		p_frame = list_first_entry(&mem->user_space_free_pages_list, struct page_frame, mm_memory_list);
-		list_move_tail(&p_frame->mm_memory_list, &mem->user_space_alloc_pages_list);
-		
-		mem->num_free_user_space_pages -= 1;
-		p_frame->free = false;
+		// Improv : Try adding sleeping mechanism or yeild the CPU
+	}
+	
+	list_add_tail(&swap_block->ss_link, &swap_sp->swap_blocks);
+	
+	if(list_empty(&mem->alloc_pages))
+	{
+		mutex_unlock(&swap_sp->swap_space_mutex);
+		mutex_unlock(&mem->mm_memory_mutex);
+		printk(KERN_ERR "mm_management : No page frames available in the memory\n");
+		return -NO_PAGE_FRAME_AVAILABLE;
+	}
+	
+	struct mm_page_frame * p_frame = list_first_entry(&mem->alloc_pages, struct mm_page_frame, pf_link);
+	
+	swap_block->virtual_pframe_addr = p_frame->virtual_start_address;
+	swap_block->pid = p_frame->pid;
+	swap_block->data = kmalloc( PAGE_SIZE_EXP, GFP_KERNEL);
+	
+	memcpy(swap_block->data, (void *)p_frame->physical_start_address, PAGE_SIZE_EXP);
+	
+	int err = invalidate_PTE(p_frame->virtual_start_address);
+	
+	if(err)
+	{
+		mutex_unlock(&swap_sp->swap_space_mutex);
+		mutex_unlock(&mem->mm_memory_mutex);
+		return err;
+	}
+	
+	list_move_tail(&p_frame->pf_link, &mem->free_pages);
+	
+	mutex_unlock(&swap_sp->swap_space_mutex);
+	mutex_unlock(&mem->mm_memory_mutex);
+	
+	printk("mm_management : PAGE_SWAP : Page frame addr:%lx\n", p_frame->physical_start_address);
+	
+	return 0;
+}
+
+static int get_swap_space_data(void * meta_data)
+{
+	struct swap_meta_data * m_data = (struct swap_meta_data *)meta_data;
+	struct swap_block *s_block, *temp;
+	struct mm_page_frame * p_frame;
+	
+	printk("DEBUG : m_data->pid:%d, m_data->virtual_pframe_addr:%lx\n", m_data->pid, m_data->virtual_pframe_addr);
+	
+	list_for_each_entry_safe(s_block, temp, &swap_sp->swap_blocks, ss_link)
+	{
+		if(s_block->pid == m_data->pid && s_block->virtual_pframe_addr == m_data->virtual_pframe_addr )
+		{
+			p_frame = get_free_page_internal(0);
+			
+			int err = update_page_table(m_data->virtual_pframe_addr, p_frame->physical_start_address);
+			
+			if(err)
+			{
+				// Improv : call free_page
+				return err;
+			}
+			else
+			{
+				mutex_lock(&mem->mm_memory_mutex);
+				
+				p_frame->virtual_start_address = m_data->virtual_pframe_addr;
+				p_frame->pid = m_data->pid;
+				memcpy((void *)p_frame->physical_start_address, s_block->data, PAGE_SIZE_EXP);
+				
+				mutex_unlock(&mem->mm_memory_mutex);
+			}
+			
+			list_del(&s_block->ss_link);
+			
+			kfree(s_block->data);
+			kfree(s_block);
+			
+			return 0;
+		}
+	}
+	
+	return -SWAP_SPACE_ERROR;
+}
+
+/*
+This page handles page_fault when the pages are not available
+*/
+
+static int handle_page_fault(int cmd, void * data)
+{
+	int err;
+	
+	switch(cmd)
+	{
+		case PAGE_FAULT_NO_PAGE:	err = swap_page();
+						if(err)
+						{
+							return err;
+						}
+						break;
+						
+		case PAGE_FAULT_INVALID_PTE :	err = get_swap_space_data(data);
+						if(err)
+						{
+							return err;
+						}
+						break;
+	}
+	
+	return 0;
+}
+
+
+
+/*
+This function moves the page from free page list to allocated list or pinned list based om the pinned_page_flag
+If pinned_page_flag is set then it moved the page from freepage list to pinned list else to allocated list
+It returns the pointer of the pframe that was moved to allocated or pinned list
+If it returns NULL then there is no free page available
+*/
+
+static struct mm_page_frame * get_free_page_internal(bool pinned_page_flag)
+{
+	//printk("DEBUG : get_free_page_internal\n");
+	struct mm_page_frame * p_frame;
+	int err;
+	mutex_lock(&mem->mm_memory_mutex);
+	
+	if(list_empty(&mem->free_pages))
+	{
+		mutex_unlock(&mem->mm_memory_mutex);
+		err = handle_page_fault(PAGE_FAULT_NO_PAGE, 0);
+		if(err)
+		{
+			return NULL;
+		}
+	}
+	
+	if(pinned_page_flag)
+	{
+		p_frame = list_first_entry(&mem->free_pages, struct mm_page_frame, pf_link);
+		list_move_tail(&p_frame->pf_link, &mem->pinned_pages);
+		p_frame->pf_flags = p_frame->pf_flags | PF_PINNED;
+		printk("mm_management : PAGE ALLOCATION : Pinned page frame addr:%lx\n",p_frame->physical_start_address);
+	}
+	else
+	{
+		p_frame = list_first_entry(&mem->free_pages, struct mm_page_frame, pf_link);
+		list_move_tail(&p_frame->pf_link, &mem->alloc_pages);
+		printk("mm_management : PAGE ALLOCATION : Allocated page frame addr:%lx\n",p_frame->physical_start_address);
 	}
 	
 	mutex_unlock(&mem->mm_memory_mutex);
 	
-	return (p_frame);
+	return p_frame;
 }
 
-static inline uintptr_t set_PTE(uintptr_t p_frame_num)
+/*
+This function sets the page table entries
+pfn : 52 bit physical page frame number or physical page frame starting address >> 12
+returns uintptr_t with it reference and validity bit set(i.e., 54 and 53 bits)
+*/
+
+static inline uintptr_t set_PTE(uintptr_t pfn)
 {
-	p_frame_num = p_frame_num & 0x0000000FFFFFFFFF; // Extracting 36bit page frame addr
-	return p_frame_num | 0x0000003000000000; // Setting reference and validity bit
+	return pfn | 0x0030000000000000;
 }
 
 
-static uintptr_t mm_update_page_tables(uintptr_t virtual_p_frame_addr, int level, uintptr_t addr, uintptr_t physical_p_frame_num)
+/*
+This function sets the page table entries
+pfn : 52 bit physical page frame number or physical page frame starting address >> 12
+returns uintptr_t with it reference and validity bit set(i.e., 54 and 53 bits)
+*/
+
+static inline uintptr_t set_PTE_Reference_bit(uintptr_t pfn)
 {
-	struct page_frame * p_frame;
-	
-	uintptr_t virtual_p_frame_num = (virtual_p_frame_addr & 0x0000FFFFFFFFF000) >> 12; // 36bits pframe num
-	//See if you can add above line of code in prev function to minimize computation
-	
+	return pfn | 0x0020000000000000;
+}
+
+/*
+This function updates the multilevel page tables
+Paramters :
+vfn : 52 bit virtual page frame number
+level : page table level (1 - 4)
+*/
+
+static int update_multilevel_pagetables(uintptr_t vfn, uintptr_t level, uintptr_t page_table_addr, uintptr_t page_frame_physical_addr, uintptr_t * next_page_addr)
+{
+	//printk("DEBUG : update_multilevel_pagetables\n");
 	uintptr_t ind;
 	
 	switch(level)
 	{
-		case 1: ind = (virtual_p_frame_num & 0xFF8000000) >> 27;
+		case 1: ind = (vfn &  0xFF8000000) >> 27; //Extract 27-35 bits of vfn
 			break;
 		
-		case 2: ind = (virtual_p_frame_num & 0x007FC0000) >> 18;
+		case 2: ind = (vfn &  0x07FC0000) >> 18; //Extract 18-26 bits of vfn
 			break;
 			
-		case 3: ind = (virtual_p_frame_num & 0x00003FE00) >> 9;
+		case 3: ind = (vfn &  0x03FE00) >> 9; //Extract 9-17 bits of vfn
 			break;
 			
-		case 4: ind = (virtual_p_frame_num & 0x0000001FF);
+		case 4: ind = (vfn &  0x01FF); //Extract 0-8 bits of vfn
 			break;
-			
-		default: return (uintptr_t)NULL;
 	}
 	
-	printk("mm_management : ind=%lx\n", ind);
+	uintptr_t * pte_address = (uintptr_t *)((void *)page_table_addr + ind*4); // get PTE address
 	
-	uintptr_t * address = (uintptr_t *)(addr + ind*4);
-	
-	if( !( *address & 0x0000001000000000 ) )
+	if( !(*pte_address & 0x010000000000000) ) // check if the PTE entry has a valid physical address
 	{
-		if(level == 1 || level == 2 || level == 3)
+		if(level == 1 || level == 2 || level == 3) //
 		{
-			p_frame = mm_get_free_page_internal(1);
+			struct mm_page_frame * p_frame = get_free_page_internal(1);
+			if(!p_frame)
+			{
+				return -NO_PAGE_FRAME_AVAILABLE;
+			}
 			
-			// Need to add page fault handler if we dont have enough page frames in the memory
+			*pte_address = set_PTE( p_frame->physical_start_address >> 12 );
 			
-			*address = set_PTE(p_frame->physical_page_frame_num);
 		}
 		else
 		{
-			*address = set_PTE(physical_p_frame_num);
+			*pte_address = set_PTE( page_frame_physical_addr >> 12 );
 		}
 	}
+	else
+	{
+		*pte_address = set_PTE_Reference_bit(*pte_address);
+	}
+	*next_page_addr = (*pte_address & 0x000FFFFFFFFFFFFF) << 12;
 	
-	return (((uintptr_t)memory_addr >> 48) << 48) | ((*address & 0x0000000FFFFFFFFF) << 12);
+	return 0;
 }
 
-static uintptr_t mm_update_page_table(uintptr_t physical_p_frame_num)
+static int update_page_table(uintptr_t virtual_address, uintptr_t page_frame_physical_addr)
 {
-	uintptr_t addr;
-	
-	//mm_update_page_map_table(latest_virtual_p_frame, physical_p_frame_num);
-	
-	printk("mm_management : Virtual Page Address:%lx\n", latest_virtual_p_frame_addr_usr_space);
-	printk("mm_management : Physical Page Address:%lx\n", physical_p_frame_num);
-	
-	printk("mm_management : Page map table Page Address:%lx\n", (uintptr_t)mem->cr3_page_table_addr);
-	
-	addr = mm_update_page_tables(latest_virtual_p_frame_addr_usr_space, 1, (uintptr_t)mem->cr3_page_table_addr, physical_p_frame_num);
-	printk("mm_management : Page directory pointer table Page Address:%lx\n", addr);
-	
-	addr = mm_update_page_tables(latest_virtual_p_frame_addr_usr_space, 2, addr, physical_p_frame_num);
-	printk("mm_management : Page directory table Page Address:%lx\n", addr);
-	
-	addr = mm_update_page_tables(latest_virtual_p_frame_addr_usr_space, 3, addr, physical_p_frame_num);
-	printk("mm_management : Page table Page Address:%lx\n", addr);
-	
-	addr = mm_update_page_tables(latest_virtual_p_frame_addr_usr_space, 4, addr, physical_p_frame_num);
-	printk("mm_management : Page Address:%lx\n", addr);
-	
-	return latest_virtual_p_frame_addr_usr_space;
-	
-}
-
-static uintptr_t mm_get_free_page(void)
-{
-	struct page_frame * pframe = mm_get_free_page_internal(0);
-	if(!pframe)
-	{
-		printk(KERN_ERR "mm_management : No Free Pages available in the memory\n");
-		return 0;
-	}
-	
-	uintptr_t virtual_p_frame_addr = mm_update_page_table(pframe->physical_page_frame_num);
-	latest_virtual_p_frame_addr_usr_space += (0x0000000000001000);
-	return virtual_p_frame_addr;
-}
-
-static uintptr_t mm_get_page_table(uintptr_t vfn, int level, uintptr_t addr)
-{
-	uintptr_t ind;
-	
-	switch(level)
-	{
-		case 1: ind = (vfn & 0xFF8000000) >> 27;
-			break;
-		
-		case 2: ind = (vfn & 0x007FC0000) >> 18;
-			break;
-			
-		case 3: ind = (vfn & 0x00003FE00) >> 9;
-			break;
-			
-		case 4: ind = (vfn & 0x0000001FF);
-			break;
-			
-		default: return (uintptr_t)NULL;
-	}
-	
-	printk("mm_management : ind=%lx\n", ind);
-	
-	uintptr_t * address = (uintptr_t *)(addr + ind*4);
-	
-	return (((uintptr_t)memory_addr >> 48) << 48) | ((*address & 0x0000000FFFFFFFFF) << 12);
-}
-
-static uintptr_t mm_virtual_to_physical_address_translation(uintptr_t virtual_address)
-{
-	printk("mm_management : -------------\nmm_management : Address Tanslation:\nmm_management : Virtual Address : %lx\n", virtual_address);
-	
-	uintptr_t vfn = (virtual_address & 0x0000FFFFFFFFF000) >> 12;
-	uintptr_t offset = virtual_address & 0x0FFF;
-	
-	uintptr_t addr;
-	
-	addr = mm_get_page_table(vfn, 1, (uintptr_t)mem->cr3_page_table_addr);
-	addr = mm_get_page_table(vfn, 2, addr);
-	addr = mm_get_page_table(vfn, 3, addr);
-	addr = mm_get_page_table(vfn, 4, addr);
-	
-	printk("nmm_management :  Physical aaddress : %lx\n", addr | offset);
-	return addr;
-}
-
-static int mm_free_page_internal(uintptr_t page_physical_address)
-{
-	struct page_frame * p_frame, * temp_p_frame;
-	uintptr_t page_num = page_physical_address >> 12;
-	
-	mutex_lock(&mem->mm_memory_mutex);
-	
-	if(list_empty(&mem->user_space_alloc_pages_list))
-	{
-			mutex_unlock(&mem->mm_memory_mutex);
-			return -PAGE_NOT_AVAILABLE;
-	}
-		
-	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->user_space_alloc_pages_list, mm_memory_list)
-	{
-			if(p_frame->physical_page_frame_num == page_num)
-			{
-				list_move_tail(&p_frame->mm_memory_list, &mem->user_space_free_pages_list);
-				p_frame->free = true;
-				mutex_unlock(&mem->mm_memory_mutex);
-				return 0;
-			}
-	}
-	
-	if(list_empty(&mem->kernel_alloc_pages_list))
-	{
-			mutex_unlock(&mem->mm_memory_mutex);
-			return -PAGE_NOT_AVAILABLE;
-	}
-		
-	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->kernel_alloc_pages_list, mm_memory_list)
-	{
-			if(p_frame->physical_page_frame_num == page_num)
-			{
-				list_move_tail(&p_frame->mm_memory_list, &mem->kernel_free_pages_list);
-				p_frame->free = true;
-				mutex_unlock(&mem->mm_memory_mutex);
-				return 0;
-			}
-	}
-	
-	mutex_unlock(&mem->mm_memory_mutex);
-	
-	return -PAGE_NOT_AVAILABLE;
-}
-
-static void mm_free_page(uintptr_t page_virtual_address)
-{
-	uintptr_t page_physical_address;
+	//printk("DEBUG : update_page_table\n");
+	uintptr_t vfn = virtual_address >> 12;
+	uintptr_t page_table_addr;
 	int err;
 	
-	page_physical_address = mm_virtual_to_physical_address_translation(page_virtual_address);
-	
-	if((err = mm_free_page_internal(page_physical_address)) != 0 )
+	//printk("DEBUG : pagetableaddr:%lx\n", mem->cr3_page_table_addr);
+	err = update_multilevel_pagetables( vfn, 1, mem->cr3_page_table_addr, page_frame_physical_addr, &page_table_addr);
+	if(err)
 	{
-		printk(KERN_ERR "mm_management : Address not available in allocated list\n");
+		return err;
+	}
+	//page_table_addr = next_page_table_addr;
+	
+	//printk("DEBUG : pagetableaddr:%lx\n", page_table_addr);
+	err = update_multilevel_pagetables( vfn, 2, page_table_addr, page_frame_physical_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	//page_table_addr = next_page_table_addr;
+	
+	//printk("DEBUG : pagetableaddr:%lx\n", page_table_addr);
+	err = update_multilevel_pagetables( vfn, 3, page_table_addr, page_frame_physical_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	//page_table_addr = next_page_table_addr;
+	
+	//printk("DEBUG : pagetableaddr:%lx\n", page_table_addr);
+	err = update_multilevel_pagetables( vfn, 4, page_table_addr, page_frame_physical_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	return 0;
+	
+}
+
+/*
+This function requests an page to the kernel
+Returns the starting virtual address of the page frame
+*/
+
+static int get_free_page(uintptr_t * addr)
+{
+	//printk("DEBUG : get_free_page\n");
+	struct mm_page_frame * p_frame = get_free_page_internal(0);
+	
+	if(!p_frame)
+	{
+		return -1;
+	}
+	int err = update_page_table(latest_virtual_address, p_frame->physical_start_address);
+	if(err)
+	{
+		// Improv : call free_page
+		return -1;
+	}
+	else
+	{
+		p_frame->virtual_start_address = latest_virtual_address;
+		p_frame->pid = current->pid;
+		
+		//printk("DEBUG : p_frame->virtual_start_address:%lx, p_frame->pid:%d\n", p_frame->virtual_start_address, p_frame->pid);
+		
+		(* addr) = latest_virtual_address;
+		latest_virtual_address += (0x01000);
+		return 0;
 	}
 }
 
 
+
+/*
+This function converts given virtual address to physical address
+Paramters:
+virtual_address : virtual address value
+(* physical_addr) : physical address will be stored in this variable and returned back
+*/
+
+static int virtual_to_physical_address(uintptr_t virtual_address, uintptr_t * physical_addr)
+{
+	uintptr_t vfn = virtual_address >> 12;
+	uintptr_t page_table_addr;
+	
+	int err;
+	
+	err = get_multilevel_pagetables(vfn, 1, mem->cr3_page_table_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	err = get_multilevel_pagetables(vfn, 2, page_table_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	err = get_multilevel_pagetables(vfn, 3, page_table_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	err = get_multilevel_pagetables(vfn, 4, page_table_addr, &page_table_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	*physical_addr = page_table_addr;
+	
+	return 0;
+}
 
 static int __init mm_management_init(void)
 {
 	
 	printk("mm_management : \nmm_management : Start ---------------------\n");
-	initialize_memory();
 	
-	check_free_memory();
-	check_alloc_pages();
+	if(initialize_memory())
+	{
+		return -1;
+	}
+	print_list();
 	
-	printk("mm_management : ---------------------\n");
-	uintptr_t addr1 = mm_get_free_page();
-	mm_free_page(addr1);
+	uintptr_t addr1, p_addr1;
+	printk("mm_management : ---------------------------\n");
+	int err = get_free_page(&addr1);
 	
-	printk("mm_management : ---------------------\n");
-	check_free_memory();
-	check_alloc_pages();
+	if(!err)
+	{
+		printk("mm_management : addr1:%lx\n", addr1);
+	}
 	
-	printk("mm_management : ---------------------\n");
-	uintptr_t addr2 = mm_get_free_page();
-	mm_free_page(addr2);
+	virtual_to_physical_address(addr1, &p_addr1);
+	printk("mm_management : physical address adr1:%lx\n", p_addr1);
 	
-	printk("mm_management : ---------------------\n");
-	check_free_memory();
-	check_alloc_pages();
+	printk("mm_management : ---------------------------\n");
+	uintptr_t addr2;
+	err = get_free_page(&addr2);
 	
-	printk("mm_management : ---------------------\n");
-	uintptr_t addr3 = mm_get_free_page();
-	mm_free_page(addr3);
+	if(!err)
+	{
+		printk("mm_management : addr1:%lx\n", addr2);
+	}
 	
-	printk("mm_management : ---------------------\n");
-	check_free_memory();
-	check_alloc_pages();
+	virtual_to_physical_address(addr2, &addr2);
+	printk("mm_management : physical address adr2:%lx\n", addr2);
 	
-	latest_virtual_p_frame_addr_usr_space = 0x0000000000200000;
+	printk("mm_management : ---------------------------\n");
 	
-	printk("mm_management : ---------------------\n");
-	uintptr_t addr4 = mm_get_free_page();
-	mm_free_page(addr4);
+	virtual_to_physical_address(addr1, &p_addr1);
+	printk("mm_management : physical address adr1:%lx\n", p_addr1);
 	
-	printk("mm_management : ---------------------\n");
-	check_free_memory();
-	check_alloc_pages();
+	//print_list();
 	
-	latest_virtual_p_frame_addr_usr_space = 0x0000000040000000;
+	return 0;
+}
+
+/*
+Frees the memory that was given by the Linux
+*/
+
+static int uninitialize_memory(void)
+{
+	struct mm_page_frame * p_frame, * temp_p_frame;
 	
-	printk("mm_management : ---------------------\n");
-	uintptr_t addr5 = mm_get_free_page();
-	mm_free_page(addr5);
+	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->free_pages, pf_link)
+	{
+		list_del(&p_frame->pf_link);
+		kfree(p_frame);
+	}
 	
-	printk("mm_management : ---------------------\n");
-	check_free_memory();
-	check_alloc_pages();
+	if(!list_empty(&mem->free_pages))
+	{
+		printk(KERN_ERR "mm_management : All pages are not free'd. Free pages are present in kernel\n");
+		return -ERROR_DEALLOCATING_MEMORY;
+	}
 	
-	latest_virtual_p_frame_addr_usr_space = 0x0000008000000000;
+	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->alloc_pages, pf_link)
+	{
+		list_del(&p_frame->pf_link);
+		kfree(p_frame);
+	}
 	
-	printk("mm_management : ---------------------\n");
-	uintptr_t addr6 = mm_get_free_page();
-	mm_free_page(addr6);
+	if(!list_empty(&mem->alloc_pages))
+	{
+		printk(KERN_ERR "mm_management : All pages are not free'd. Allocated pages are present in kernel\n");
+		return -ERROR_DEALLOCATING_MEMORY;
+	}
 	
-	printk("mm_management : ---------------------\n");
-	check_free_memory();
-	check_alloc_pages();
+	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->pinned_pages, pf_link)
+	{
+		list_del(&p_frame->pf_link);
+		kfree(p_frame);
+	}
+	
+	if(!list_empty(&mem->pinned_pages))
+	{
+		printk(KERN_ERR "mm_management : All pages are not free'd. Pinned pages are present in kernel\n");
+		return -ERROR_DEALLOCATING_MEMORY;
+	}
+	
+	mutex_destroy(&mem->mm_memory_mutex);
+	
+	kfree((void *)mem->memory_addr_start);
+	kfree(mem);
 	
 	return 0;
 }
 
 static void __exit mm_management_exit(void)
 {
-	kfree(memory_addr);
-	kfree(mem);
+	uninitialize_memory();
 	printk("mm_management : mm_management_exit\n");
 }
 
