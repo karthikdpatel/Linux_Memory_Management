@@ -629,6 +629,91 @@ static int virtual_to_physical_address(uintptr_t virtual_address, uintptr_t * ph
 	return 0;
 }
 
+static int free_page_internal(uintptr_t physical_addr, bool pinned_page_flag)
+{
+	if( (physical_addr & 0x0000000000000FFF) != (0x000) )
+	{
+		printk(KERN_ERR "mm_management : Invalid address given to free_page_internal(), addr:%lx\n", physical_addr);
+		return -INVALID_INPUT;
+	}
+
+	struct mm_page_frame *p_frame, *temp_p_frame;
+	
+	mutex_lock(&mem->mm_memory_mutex);
+	
+	if(pinned_page_flag)
+	{	
+		if(list_empty(&mem->pinned_pages))
+		{
+			printk(KERN_ERR "mm_management : No Page available in the pinned list to free\n");
+			mutex_unlock(&mem->mm_memory_mutex);
+			return -NO_PAGE_FRAME_AVAILABLE;
+		}
+		
+		list_for_each_entry_safe(p_frame, temp_p_frame, &mem->pinned_pages, pf_link)
+		{
+			if(p_frame->physical_start_address == physical_addr)
+			{
+				list_move_tail(&p_frame->pf_link, &mem->free_pages);
+				mutex_unlock(&mem->mm_memory_mutex);
+				return 0;
+			}
+		}
+		
+		printk(KERN_ERR "mm_management : Given page is not available in the pinned list\n");
+	}
+	else
+	{
+		if(list_empty(&mem->alloc_pages))
+		{
+			printk(KERN_ERR "mm_management : No Page available in the allocated list to free\n");
+			mutex_unlock(&mem->mm_memory_mutex);
+			return -NO_PAGE_FRAME_AVAILABLE;
+		}
+		
+		list_for_each_entry_safe(p_frame, temp_p_frame, &mem->alloc_pages, pf_link)
+		{
+			if(p_frame->physical_start_address == physical_addr)
+			{
+				list_move_tail(&p_frame->pf_link, &mem->free_pages);
+				mutex_unlock(&mem->mm_memory_mutex);
+				return 0;
+			}
+		}
+		
+		printk(KERN_ERR "mm_management : Given page is not available in the pinned list\n");
+	}
+	
+	mutex_unlock(&mem->mm_memory_mutex);
+	return -NO_PAGE_FRAME_AVAILABLE;
+}
+
+static int mm_free_page(uintptr_t virtual_addr)
+{
+	int err;
+	
+	uintptr_t physical_addr;
+	
+	err = virtual_to_physical_address(virtual_addr, &physical_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	err = invalidate_PTE(virtual_addr);
+	if(err)
+	{
+		return err;
+	}
+	
+	err = free_page_internal(physical_addr , 0);
+	if(err)
+	{
+		return err;
+	}
+	return 0;
+}
+
 static int __init mm_management_init(void)
 {
 	
@@ -639,8 +724,6 @@ static int __init mm_management_init(void)
 		return -1;
 	}
 	print_list();
-	
-	print_swap_space();
 	
 	uintptr_t addr1, p_addr1;
 	printk("mm_management : ---------------------------\n");
@@ -654,30 +737,9 @@ static int __init mm_management_init(void)
 	virtual_to_physical_address(addr1, &p_addr1);
 	printk("mm_management : physical address adr1:%lx\n", p_addr1);
 	
-	print_swap_space();
+	err = mm_free_page(addr1);
 	
-	printk("mm_management : ---------------------------\n");
-	uintptr_t addr2;
-	err = get_free_page(&addr2);
-	
-	if(!err)
-	{
-		printk("mm_management : addr1:%lx\n", addr2);
-	}
-	
-	virtual_to_physical_address(addr2, &addr2);
-	printk("mm_management : physical address adr2:%lx\n", addr2);
-	
-	print_swap_space();
-	
-	printk("mm_management : ---------------------------\n");
-	
-	virtual_to_physical_address(addr1, &p_addr1);
-	printk("mm_management : physical address adr1:%lx\n", p_addr1);
-	
-	print_swap_space();
-	
-	//print_list();
+	print_list();
 	
 	return 0;
 }
