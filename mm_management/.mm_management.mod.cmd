@@ -1,1 +1,0 @@
-savedcmd_/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_management.mod := printf '%s\n'   mm_management.o | awk '!x[$$0]++ { print("/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/"$$0) }' > /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_management.mod

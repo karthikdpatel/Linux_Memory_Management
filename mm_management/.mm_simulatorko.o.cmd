@@ -1,0 +1,1 @@
+savedcmd_/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_simulatorko.o := ld -m elf_x86_64 -z noexecstack   -r -o /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_simulatorko.o @/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_simulatorko.mod 

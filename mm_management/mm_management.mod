@@ -1,1 +1,0 @@
-/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_management.o

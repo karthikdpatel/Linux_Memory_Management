@@ -1,1 +1,1 @@
-savedcmd_/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/modules.order := {   echo /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_management.o; :; } > /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/modules.order
+savedcmd_/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/modules.order := {   echo /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_simulatorko.o; :; } > /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/modules.order

@@ -1,20 +1,3 @@
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/fs.h>
-#include <linux/cdev.h>
-#include <linux/slab.h>
-#include <asm/uaccess.h>
-#include "mm_management.h"
-#include <linux/spinlock.h>
-#include "error_types.h"
-
-MODULE_LICENSE("Dual BSD/GPL");
-
-struct mm_physical_memory * mem;
-struct swap_space * swap_sp;
-
-uintptr_t latest_virtual_address = 0x0000000000000000;	
-
 /*
 This function prints the physical addresses of the pages present in free_pages, alloc_pages, pinned_pages list
 */
@@ -273,7 +256,7 @@ static int swap_page(void)
 			mutex_unlock(&mem->mm_memory_mutex);
 		}
 		
-		// Improv : Try adding sleeping mechanism or yeild the CPU
+		// Improve : Try adding sleeping mechanism or yeild the CPU
 	}
 	
 	list_add_tail(&swap_block->ss_link, &swap_sp->swap_blocks);
@@ -713,95 +696,3 @@ static int mm_free_page(uintptr_t virtual_addr)
 	}
 	return 0;
 }
-
-static int __init mm_management_init(void)
-{
-	
-	printk("mm_management : \nmm_management : Start ---------------------\n");
-	
-	if(initialize_memory())
-	{
-		return -1;
-	}
-	print_list();
-	
-	uintptr_t addr1, p_addr1;
-	printk("mm_management : ---------------------------\n");
-	int err = get_free_page(&addr1);
-	
-	if(!err)
-	{
-		printk("mm_management : addr1:%lx\n", addr1);
-	}
-	
-	virtual_to_physical_address(addr1, &p_addr1);
-	printk("mm_management : physical address adr1:%lx\n", p_addr1);
-	
-	err = mm_free_page(addr1);
-	
-	print_list();
-	
-	return 0;
-}
-
-/*
-Frees the memory that was given by the Linux
-*/
-
-static int uninitialize_memory(void)
-{
-	struct mm_page_frame * p_frame, * temp_p_frame;
-	
-	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->free_pages, pf_link)
-	{
-		list_del(&p_frame->pf_link);
-		kfree(p_frame);
-	}
-	
-	if(!list_empty(&mem->free_pages))
-	{
-		printk(KERN_ERR "mm_management : All pages are not free'd. Free pages are present in kernel\n");
-		return -ERROR_DEALLOCATING_MEMORY;
-	}
-	
-	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->alloc_pages, pf_link)
-	{
-		list_del(&p_frame->pf_link);
-		kfree(p_frame);
-	}
-	
-	if(!list_empty(&mem->alloc_pages))
-	{
-		printk(KERN_ERR "mm_management : All pages are not free'd. Allocated pages are present in kernel\n");
-		return -ERROR_DEALLOCATING_MEMORY;
-	}
-	
-	list_for_each_entry_safe(p_frame, temp_p_frame, &mem->pinned_pages, pf_link)
-	{
-		list_del(&p_frame->pf_link);
-		kfree(p_frame);
-	}
-	
-	if(!list_empty(&mem->pinned_pages))
-	{
-		printk(KERN_ERR "mm_management : All pages are not free'd. Pinned pages are present in kernel\n");
-		return -ERROR_DEALLOCATING_MEMORY;
-	}
-	
-	mutex_destroy(&mem->mm_memory_mutex);
-	
-	kfree((void *)mem->memory_addr_start);
-	kfree(mem);
-	
-	return 0;
-}
-
-static void __exit mm_management_exit(void)
-{
-	uninitialize_memory();
-	printk("mm_management : mm_management_exit\n");
-}
-
-module_init(mm_management_init);
-module_exit(mm_management_exit);
-

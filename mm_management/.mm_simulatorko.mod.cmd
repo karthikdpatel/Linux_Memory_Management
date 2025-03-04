@@ -1,0 +1,1 @@
+savedcmd_/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_simulatorko.mod := printf '%s\n'   mm_simulator.o mm/mm_management.o mm/mm_page_frame.o mm/mm_swap_space.o | awk '!x[$$0]++ { print("/home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/"$$0) }' > /home/karthikdpatel/Documents/Linux_Memory_Management/mm_management/mm_simulatorko.mod
